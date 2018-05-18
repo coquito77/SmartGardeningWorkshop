@@ -234,7 +234,7 @@ print(x.big,
 
 
 
-```{r elevationPlots, include = TRUE}
+```{r elevationPlots, include = TRUE, eval = TRUE}
 
 # rm(list = ls(all = TRUE)); setwd("~/GitHub/SmartGardeningWorkshop/") # set the working directory
 # load data
@@ -248,18 +248,7 @@ load("./finalData.Rdata")
 # http://zevross.com/blog/2015/03/30/map-and-analyze-raster-data-in-r/
 # https://viewer.nationalmap.gov/basic/#productSearch
 # https://topotools.cr.usgs.gov/pdfs/gesch_chp_4_nat_elev_data_2007.pdf
-# 
-# data(lake)
-# 
-# lake <- lake
-# 
-# lake_sf <- sf::st_as_sf(lake)
-# 
-# plot(lake_sf$geometry)
-# 
-# lake_sp <- sf:::as_Spatial(lake_sf$geometry) 
-# 
-# elevation <- get_elev_raster(lake, z = 9, src = "aws")
+
 
 library(rgdal)
 
