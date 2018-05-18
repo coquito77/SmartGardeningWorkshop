@@ -1,0 +1,361 @@
+---
+title: "Smart Gardening Workshop"
+output:
+  pdf_document:
+    includes:
+    keep_tex: true
+    fig_caption: true
+    fig_crop: false
+    toc: true
+    number_sections: true
+    fig_width: 7
+    fig_height: 6
+fontsize: 11pt
+urlcolor: blue
+header-includes:
+- \usepackage{palatino, lscape, rotating, booktabs, colortbl, lipsum, fancyhdr, color, titling, float, subfig, graphicx, longtable, dcolumn}
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(cache = TRUE, echo = FALSE, message = FALSE, warning = FALSE, include = FALSE, dev = "cairo_pdf")
+
+library(rvest)
+library(tidyverse)
+library(tidytext)
+library(zoo)
+library(ggmap)
+library(elevatr)
+
+```
+
+## R Markdown
+
+
+```{r getAddeses, eval = FALSE}
+
+rm(list = ls(all = TRUE)) #start with empty workspace
+
+setwd("~/GitHub/SmartGardeningWorkshop") 
+
+lego_movie <- read_html("https://dpw.lacounty.gov/epd/sg/wk_scheds.cfm")
+
+t <-  lego_movie %>%
+  html_nodes("table") %>%
+  .[[3]] %>%
+  html_table() %>% 
+  mutate_all(
+    funs((gsub("[[:cntrl:]]","|",.)))) %>% 
+  mutate_all(
+    funs((gsub("\\|{1,55}","|",.)))) %>% 
+  mutate_all(
+    funs((gsub("\\(flyer\\)","|",.)))) %>% 
+  mutate_all(
+    funs((gsub("\\s+", " ",.)))) 
+
+data <- t %>%
+  unnest_tokens(sentence, X1, token = "regex", pattern = "\\|") %>% 
+  select(sentence) %>% 
+  rbind(t %>%
+          unnest_tokens(sentence, X2, token = "regex", pattern = "\\|") %>% 
+          select(sentence) ) %>% 
+  filter(sentence != "la arboretum ($9 entrance fee)") %>% 
+  filter(!grepl(" instruction on the bas", sentence)) %>% 
+  #filter(!grepl(" ", sentence)) %>% 
+  mutate(sentence = gsub("beginner workshops", "", sentence)) %>% 
+  mutate(date = ifelse(grepl("[0-9]{1,},", sentence), sub('.*-', '', sentence),""), # remove everything before
+         City = ifelse(grepl("[0-9]{1,},", sentence), sub('-.*', '', sentence),""),  # remove everyhting after
+         time = ifelse(grepl(":", sentence), sub('.*,', '', sentence),""),
+         time = lead(time, 1),
+         Location = ifelse(grepl("[0-9]{2,} [A-z]{1,}", sentence) & !grepl(":", sentence), sentence,""),
+         Location = lead(Location, 2),
+         Location1 = sub('\\([A-z].*', '', Location),
+         Address = gsub(".*?([0-9]{2,6})", "\\1", Location1),
+         Address = paste0(trimws(Address),", ", trimws(City), ", CA"),
+         Location2 =  sub('[0-9]{2,}.*', '', Location)) %>% 
+  filter(City != "")
+
+rm(list=setdiff(ls(), "data"))
+
+from <- c("9267 Jurupa Rd, Riverside, CA 92509")
+
+to <- data %>% pull(7) %>% unique
+
+all_tables <- vector("list", length = (length(to)))
+
+for(i in 1:length(all_tables)){
+  print(i)
+  # error handling - skips to next URL if it gets an error
+  result <- try(
+    all_tables[[i]] <-  ggmap::mapdist(from, to[i])  %>% #   geocode(to[i], output = "more") %>%
+      mutate(Dest = to[i])
+  ); if(class(result) == "try-error") next; Sys.sleep(1);
+}
+
+df <- all_tables %>% # head(1000) %>%
+  plyr::ldply(data.frame)
+
+distQueryCheck()
+
+distances <- mapdist(from, to) %>% 
+  left_join(data %>% select(date, time, Address, Location2),
+            by = c("to" = "Address"))
+
+all_tables <- vector("list", length = (length(to)))
+
+for(i in 1:length(all_tables)){
+  print(i)
+  # error handling - skips to next URL if it gets an error
+  result <- try(
+    all_tables[[i]] <-  geocode(to[i], output = "more") %>% 
+      mutate(to = to[i])
+  ); if(class(result) == "try-error") next; Sys.sleep(1);
+}
+
+# make a df
+df <- all_tables %>% # head(1000) %>%
+  plyr::ldply(data.frame)
+
+distQueryCheck()
+
+# filter for missing and then loop them again
+
+to2 <- df %>% filter(is.na(lon)) %>% 
+  pull(3) 
+
+all_tables <- vector("list", length = (length(to2)))
+
+for(i in 1:length(all_tables)){
+  print(i)
+  # error handling - skips to next URL if it gets an error
+  result <- try(
+    all_tables[[i]] <-  geocode(to2[i], output = "more")  %>% 
+      mutate(to = to2[i])
+  ); if(class(result) == "try-error") next; Sys.sleep(1);
+}
+
+# make a df
+
+df2 <- all_tables %>% # head(1000) %>%
+  plyr::ldply(data.frame) 
+
+to3 <- df2 %>% filter(is.na(lon)) %>% 
+  pull(15) 
+
+all_tables <- vector("list", length = (length(to3)))
+
+for(i in 1:length(all_tables)){
+  print(i)
+  # error handling - skips to next URL if it gets an error
+  result <- try(
+    all_tables[[i]] <-  geocode(to3[i], output = "more")  %>% 
+      mutate(to = to3[i])
+  ); if(class(result) == "try-error") next; Sys.sleep(1);
+}
+
+finalData <- all_tables %>% # head(1000) %>%
+  plyr::ldply(data.frame) %>% 
+  full_join(df2) %>% 
+  full_join(df) %>% 
+  filter(!is.na(loctype)) %>% 
+  select(lon, lat, type, loctype, address, to) 
+
+finalData <- finalData %>% 
+  right_join(distances)
+
+rm(list=setdiff(ls(), "finalData"))
+
+save.image(file = "finalData.Rdata")
+
+```
+
+```{r addElevationData, eval = FALSE}
+
+# rm(list = ls(all = TRUE)); setwd("~/GitHub/SmartGardeningWorkshop/") # set the working directory
+# load data
+
+load("./finalData.Rdata")
+
+finalData <- finalData %>% 
+  mutate(date =  as.Date(date, " %b %d, %Y"))
+
+prj_dd <- "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
+
+df_elev_epqs <- get_elev_point(finalData[,(1:2)], prj = prj_dd, src = "epqs")
+
+finalData <- finalData %>% 
+  cbind(data.frame(df_elev_epqs@data))
+
+get_elev_point( ggmap::geocode("9267 Jurupa Rd, Riverside, CA 92509", output = "more")[,(1:2)], prj = prj_dd, src = "epqs")
+
+rm(list = setdiff(ls(), "finalData"))
+
+save.image(file = "finalData.Rdata")
+
+```
+
+\begin{landscape}
+
+\footnotesize
+
+
+```{r tblTimesAndLocations, results='asis', eval = TRUE, include = TRUE, cache = FALSE}
+
+load("./finalData.Rdata")
+
+library(xtable)
+tblZoneSubZoneRuns <- finalData %>% select(lon, lat, to, km, miles, hours, date, time, elevation) %>% 
+         arrange(km, desc(date))
+
+x.big <- xtable(tblZoneSubZoneRuns,
+                digits = rep(0, ncol(tblZoneSubZoneRuns)+1),
+                caption = "The table of times, location and distances. \\label{tblTimesAndLocations}")
+
+#names(x.big)[3] <- paste('OCU Time','footnote')    # I put the tag on I letter 
+
+align(x.big) <- "rrrllrrrrr"
+
+rws <- seq(1, (nrow(tblZoneSubZoneRuns)-1), by = 2)
+col <- rep("\\rowcolor[gray]{0.95}", length(rws))
+
+print(x.big,
+      size = "footnotesize",
+      #add.to.row = addtorow,
+      #rotate.colnames = TRUE,
+      # tabular.environment='longtable',
+      #sanitize.text.function=function(str)gsub("footnote","\\footnote{my tricky footnote !!}",str,fixed=TRUE),
+      scalebox = 0.75,
+      comment = FALSE,
+      include.colnames = TRUE,
+      format.args = list(big.mark =",", decimal.mark = "."),
+      include.rownames = TRUE, #)  # addtorow will substitute the default row names 
+      add.to.row = list(pos = as.list(rws), command = col)
+)
+
+```
+
+
+\end{landscape}
+
+```{r elevationPlots, include = TRUE}
+
+# rm(list = ls(all = TRUE)); setwd("~/GitHub/SmartGardeningWorkshop/") # set the working directory
+# load data
+
+load("./finalData.Rdata")
+
+# get elevation data from raster file
+# https://viewer.nationalmap.gov/help/3.0%20TNM%20Base%20Maps.htm
+# https://catalog.data.gov/dataset?collection_package_id=988723e5-b093-4520-9ea3-cbfea7769bae
+# http://www.nickeubank.com/wp-content/uploads/2015/10/RGIS3_MakingMaps_part2_mappingRasterData.html
+# http://zevross.com/blog/2015/03/30/map-and-analyze-raster-data-in-r/
+# https://viewer.nationalmap.gov/basic/#productSearch
+# https://topotools.cr.usgs.gov/pdfs/gesch_chp_4_nat_elev_data_2007.pdf
+# 
+# data(lake)
+# 
+# lake <- lake
+# 
+# lake_sf <- sf::st_as_sf(lake)
+# 
+# plot(lake_sf$geometry)
+# 
+# lake_sp <- sf:::as_Spatial(lake_sf$geometry) 
+# 
+# elevation <- get_elev_raster(lake, z = 9, src = "aws")
+
+library(rgdal)
+
+HomeLocAtion <- ggmap::geocode("9267 Jurupa Rd, Riverside, CA 92509", output = "more")[,(1:2)] %>% 
+  coordinates()
+
+HomeLocAtion <- SpatialPoints(HomeLocAtion, CRS("+proj=longlat +datum=WGS84"))
+
+# link to zooming resolution
+# https://mapzen.com/documentation/terrain-tiles/data-sources/#what-is-the-ground-resolution
+
+elevation11 <- get_elev_raster(locations = HomeLocAtion, z = 11, src = "aws")
+
+plot(elevation11, main = "Zoom = 11")
+
+plot(HomeLocAtion, add = TRUE)
+
+elevation <- get_elev_raster(locations = HomeLocAtion, z = 9, src = "aws")
+
+plot(elevation, main = "Zoom = 9")
+
+plot(HomeLocAtion, add = TRUE)
+
+# http://pakillo.github.io/R-GIS-tutorial/
+
+rasterVis::histogram(elevation)
+
+# pairs(elevation)
+
+raster::persp(elevation)
+
+raster::contour(elevation)
+
+rasterVis::contourplot(elevation)
+
+rasterVis::levelplot(elevation)
+
+raster::Moran(elevation)  # global Moran's I
+
+tmin1.Moran <- raster::MoranLocal(elevation)
+
+plot(tmin1.Moran)
+
+x <- raster::terrain(elevation, opt = c("slope", "aspect"), unit = "degrees")
+
+plot(x)
+
+slope <- raster::terrain(elevation, opt = "slope")
+
+aspect <- raster::terrain(elevation, opt = "aspect")
+
+hill <- raster::hillShade(slope, aspect, 40, 270)
+
+plot(hill, col = grey(0:100/100), legend = FALSE, main = "Area")
+
+plot(elevation, col = rainbow(25, alpha = 0.35), add = TRUE)
+
+plot(HomeLocAtion, add = TRUE)
+
+# plot layer in ggplot2
+
+
+map.p <- raster::rasterToPoints(elevation)
+
+df <- data.frame(map.p)
+#Make appropriate column headings
+colnames(df) <- c("Longitude", "Latitude","test")
+
+ggplot() +
+  geom_raster(data = df,
+              aes(y = Latitude, x = Longitude, fill = test ))
+
+
+```
+
+
+```{r importRoads, eval = FALSE}
+
+# https://www.census.gov/geo/maps-data/data/tiger-line.html
+# https://www.census.gov/cgi-bin/geo/shapefiles/index.php
+# https://www.census.gov/cgi-bin/geo/shapefiles/index.php?year=2017&layergroup=Roads
+
+# temp <- unzip('C:/.../tl_2017_06065_roads.zip')
+# 
+# temp
+
+library(sf)
+library(rgdal)
+library(sp)
+
+RivRoads <- read_sf("tl_2017_06065_roads.shp") %>% 
+    st_transform(crs = 4326)
+  
+
+```
+
