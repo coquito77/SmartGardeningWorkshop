@@ -194,9 +194,6 @@ save.image(file = "finalData.Rdata")
 
 ```
 
-\begin{landscape}
-
-\footnotesize
 
 
 ```{r tblTimesAndLocations, results='asis', eval = TRUE, include = TRUE, cache = FALSE}
@@ -204,18 +201,19 @@ save.image(file = "finalData.Rdata")
 load("./finalData.Rdata")
 
 library(xtable)
-tblZoneSubZoneRuns <- finalData %>% select(lon, lat, to, km, miles, hours, date, time, elevation) %>% 
+tblData <- finalData %>% select(lon, lat, to, km, miles, hours, date, time, elevation) %>% 
+  mutate(date = as.character(date)) %>% 
          arrange(km, desc(date))
 
-x.big <- xtable(tblZoneSubZoneRuns,
-                digits = rep(0, ncol(tblZoneSubZoneRuns)+1),
+x.big <- xtable(tblData,
+                digits = rep(2, ncol(tblData)+1),
                 caption = "The table of times, location and distances. \\label{tblTimesAndLocations}")
 
 #names(x.big)[3] <- paste('OCU Time','footnote')    # I put the tag on I letter 
 
 align(x.big) <- "rrrllrrrrr"
 
-rws <- seq(1, (nrow(tblZoneSubZoneRuns)-1), by = 2)
+rws <- seq(1, (nrow(tblData)-1), by = 2)
 col <- rep("\\rowcolor[gray]{0.95}", length(rws))
 
 print(x.big,
@@ -235,7 +233,6 @@ print(x.big,
 ```
 
 
-\end{landscape}
 
 ```{r elevationPlots, include = TRUE}
 
